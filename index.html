@@ -4,15 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0d1517">
-  <meta name="description" content="MITIL Instructor Desk: a central home for schedules, presentations, handouts, classroom preparation, videos, and manager resources.">
-  <meta property="og:title" content="MITIL Instructor Desk">
-  <meta property="og:description" content="Class resources, schedules, presentations, handouts, and instructor materials in one place.">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://krstoots22.github.io/Schedule/">
-  <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="MITIL Instructor Desk">
-  <meta name="twitter:description" content="Class resources, schedules, presentations, handouts, and instructor materials in one place.">
-  <title>MITIL Instructor Desk | Class Resources</title>
+  <title>Instructor Desk | Class Resources</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -221,6 +213,54 @@
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script type="module">
+    window.firebaseCloudReady = (async () => {
+      const [{ initializeApp }, { getAuth, signInAnonymously }, { getFirestore, doc, getDoc, setDoc, onSnapshot }, { getStorage, ref, uploadBytes, getDownloadURL, deleteObject }] = await Promise.all([
+        import("https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js"),
+        import("https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js"),
+        import("https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js"),
+        import("https://www.gstatic.com/firebasejs/11.0.2/firebase-storage.js")
+      ]);
+      const app = initializeApp({
+        apiKey: "AIzaSyBUl5WIk-O1sVxMBtiFWwB4q6FsvDM8kyQ",
+        authDomain: "instructor-desk.firebaseapp.com",
+        projectId: "instructor-desk",
+        storageBucket: "instructor-desk.firebasestorage.app",
+        messagingSenderId: "394715996615",
+        appId: "1:394715996615:web:5923ff71284cb64a2bb9e2"
+      });
+      const auth = getAuth(app);
+      await signInAnonymously(auth);
+      const database = getFirestore(app);
+      const storage = getStorage(app);
+      const workspaceRef = doc(database, "workspaces", "instructor-desk");
+      return {
+        async readWorkspace() {
+          return getDoc(workspaceRef);
+        },
+        async writeWorkspace(data) {
+          return setDoc(workspaceRef, data);
+        },
+        watchWorkspace(callback) {
+          return onSnapshot(workspaceRef, (snapshot) => {
+            if (snapshot.exists()) callback(snapshot.data());
+          });
+        },
+        async uploadFile(file, path) {
+          const fileRef = ref(storage, path);
+          await uploadBytes(fileRef, file, { contentType: file.type || "application/octet-stream" });
+          return getDownloadURL(fileRef);
+        },
+        async deleteFile(path) {
+          if (path) await deleteObject(ref(storage, path));
+        }
+      };
+    })().catch((error) => {
+      console.error("Cloud sync unavailable", error);
+      return null;
+    });
+  </script>
+
   <script>
     (() => {
       const storageKey = "instructor-desk-category-links-v1";
@@ -262,6 +302,9 @@
       let activeCategory = categories[0] ? categories[0].id : "links";
       let activeFolderId = "all";
       let linksByCategory = loadLinks();
+      let cloudApi = null;
+      let cloudWorkspace = null;
+      let cloudSaveTimer;
 
       function loadFolders() {
         let stored;
@@ -276,6 +319,7 @@
       function saveFolders() {
         try {
           localStorage.setItem(folderStorageKey, JSON.stringify(foldersByCategory));
+          queueCloudSave();
           return true;
         } catch {
           showToast("Unable to save folders in this browser.");
@@ -382,6 +426,7 @@
       function saveCategories() {
         try {
           localStorage.setItem(categoryStorageKey, JSON.stringify(categories));
+          queueCloudSave();
           return true;
         } catch {
           showToast("Unable to save the tab order in this browser.");
@@ -503,6 +548,7 @@
       function saveLinks() {
         try {
           localStorage.setItem(storageKey, JSON.stringify(linksByCategory));
+          queueCloudSave();
           document.querySelector("#save-status").textContent = `Saved automatically · ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
           return true;
         } catch {
@@ -516,6 +562,66 @@
         toast.classList.add("show");
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => toast.classList.remove("show"), 3000);
+      }
+
+      function workspaceData() {
+        return { categories, foldersByCategory, linksByCategory, fileRecords: cloudWorkspace?.fileRecords || [] };
+      }
+
+      function queueCloudSave() {
+        if (!cloudApi || !cloudWorkspace) return;
+        clearTimeout(cloudSaveTimer);
+        cloudSaveTimer = setTimeout(async () => {
+          try {
+            await cloudApi.writeWorkspace(workspaceData());
+            document.querySelector("#save-status").textContent = "Saved for all instructors";
+          } catch {
+            showToast("Local changes saved, but cloud sync failed.");
+          }
+        }, 250);
+      }
+
+      async function initializeCloudSync() {
+        try {
+          cloudApi = await window.firebaseCloudReady;
+          if (!cloudApi) throw new Error("Firebase initialization failed.");
+          const snapshot = await cloudApi.readWorkspace();
+          if (snapshot.exists()) {
+            cloudWorkspace = snapshot.data();
+            if (Array.isArray(cloudWorkspace.categories)) categories = cloudWorkspace.categories;
+            if (cloudWorkspace.foldersByCategory && typeof cloudWorkspace.foldersByCategory === "object") foldersByCategory = cloudWorkspace.foldersByCategory;
+            if (cloudWorkspace.linksByCategory && typeof cloudWorkspace.linksByCategory === "object") linksByCategory = cloudWorkspace.linksByCategory;
+            localStorage.setItem(categoryStorageKey, JSON.stringify(categories));
+            localStorage.setItem(folderStorageKey, JSON.stringify(foldersByCategory));
+            localStorage.setItem(storageKey, JSON.stringify(linksByCategory));
+            document.querySelector("#save-status").textContent = "Live shared workspace";
+          } else {
+            cloudWorkspace = { fileRecords: [] };
+            const localFiles = await readLocalFiles();
+            for (const file of localFiles) {
+              const path = `instructor-desk/${file.id}-${file.name}`;
+              const url = await cloudApi.uploadFile(file.blob, path);
+              cloudWorkspace.fileRecords.push({ id: file.id, category: file.category, folderId: file.folderId || "unfiled", name: file.name, type: file.type, size: file.size, addedAt: file.addedAt, url, storagePath: path });
+            }
+            await cloudApi.writeWorkspace(workspaceData());
+            document.querySelector("#save-status").textContent = "Live shared workspace initialized";
+          }
+          cloudApi.watchWorkspace((data) => {
+            cloudWorkspace = data;
+            if (Array.isArray(data.categories)) categories = data.categories;
+            if (data.foldersByCategory && typeof data.foldersByCategory === "object") foldersByCategory = data.foldersByCategory;
+            if (data.linksByCategory && typeof data.linksByCategory === "object") linksByCategory = data.linksByCategory;
+            if (!categories.some((category) => category.id === activeCategory)) activeCategory = categories[0]?.id || "links";
+            renderTabs();
+            selectCategory(activeCategory);
+          });
+          renderTabs();
+          selectCategory(activeCategory);
+        } catch (error) {
+          console.error("Cloud sync unavailable", error);
+          document.querySelector("#save-status").textContent = "Saved locally in this browser";
+          showToast("Cloud sync is unavailable. Local saving is still active.");
+        }
       }
 
       function openFileDatabase() {
@@ -533,7 +639,17 @@
         return fileDatabase;
       }
 
+      async function readLocalFiles(categoryId) {
+        const db = await openFileDatabase();
+        return new Promise((resolve, reject) => {
+          const request = db.transaction("files", "readonly").objectStore("files").getAll();
+          request.onsuccess = () => resolve(request.result.filter((file) => !categoryId || file.category === categoryId));
+          request.onerror = () => reject(request.error);
+        });
+      }
+
       async function readFiles(categoryId) {
+        if (cloudWorkspace) return (cloudWorkspace.fileRecords || []).filter((file) => file.category === categoryId);
         const db = await openFileDatabase();
         return new Promise((resolve, reject) => {
           const request = db.transaction("files", "readonly").objectStore("files").getAll();
@@ -555,6 +671,15 @@
       }
 
       async function deleteFile(fileId) {
+        if (cloudWorkspace) {
+          const record = (cloudWorkspace.fileRecords || []).find((file) => file.id === fileId);
+          if (record) {
+            await cloudApi.deleteFile(record.storagePath);
+            cloudWorkspace.fileRecords = cloudWorkspace.fileRecords.filter((file) => file.id !== fileId);
+            queueCloudSave();
+          }
+          return;
+        }
         const db = await openFileDatabase();
         return new Promise((resolve, reject) => {
           const transaction = db.transaction("files", "readwrite");
@@ -746,8 +871,8 @@
               const row = document.createElement("div");
               row.className = "file-item";
               const anchor = document.createElement("a");
-              const objectUrl = URL.createObjectURL(file.blob);
-              fileObjectUrls.push(objectUrl);
+              const objectUrl = file.url || (file.blob && URL.createObjectURL(file.blob));
+              if (!file.url) fileObjectUrls.push(objectUrl);
               anchor.href = objectUrl;
               anchor.download = file.name;
               anchor.textContent = file.name;
@@ -784,6 +909,7 @@
       }
 
       async function getAllFiles() {
+        if (cloudWorkspace) return cloudWorkspace.fileRecords || [];
         const db = await openFileDatabase();
         return new Promise((resolve, reject) => {
           const request = db.transaction("files", "readonly").objectStore("files").getAll();
@@ -809,17 +935,30 @@
               await deleteFile(duplicate.id);
             }
           }
-          const files = pendingFiles.map((file) => ({
-            id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            category: categoryId,
-            folderId,
-            name: file.name,
-            type: file.type,
-            size: file.size,
-            addedAt: new Date().toISOString(),
-            blob: file
-          }));
-          await writeFiles(files);
+          const files = [];
+          for (const file of pendingFiles) {
+            const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            const record = {
+              id,
+              category: categoryId,
+              folderId,
+              name: file.name,
+              type: file.type,
+              size: file.size,
+              addedAt: new Date().toISOString(),
+              blob: file
+            };
+            if (cloudWorkspace) {
+              const storagePath = `instructor-desk/${id}-${file.name}`;
+              record.url = await cloudApi.uploadFile(file, storagePath);
+              record.storagePath = storagePath;
+              delete record.blob;
+              cloudWorkspace.fileRecords.push(record);
+            }
+            files.push(record);
+          }
+          if (!cloudWorkspace) await writeFiles(files);
+          if (cloudWorkspace) queueCloudSave();
           document.querySelector("#save-status").textContent = `${files.length} file${files.length === 1 ? "" : "s"} saved locally`;
           await renderFiles(categoryId);
         } catch {
@@ -946,6 +1085,7 @@
       refreshFolderSelects();
       renderTabs();
       selectCategory(activeCategory);
+      initializeCloudSync();
     })();
   </script>
 </body>
