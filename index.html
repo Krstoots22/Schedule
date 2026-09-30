@@ -257,6 +257,7 @@
       };
     })().catch((error) => {
       console.error("Cloud sync unavailable", error);
+      window.firebaseCloudError = error;
       return null;
     });
   </script>
@@ -614,7 +615,7 @@
             linksByCategory: JSON.parse(JSON.stringify(linksByCategory))
           };
           cloudApi = await window.firebaseCloudReady;
-          if (!cloudApi) throw new Error("Firebase initialization failed.");
+          if (!cloudApi) throw window.firebaseCloudError || new Error("Firebase initialization failed.");
           const snapshot = await cloudApi.readWorkspace();
           if (snapshot.exists()) {
             cloudWorkspace = mergeWorkspaceData(localBaseline, snapshot.data());
@@ -659,7 +660,13 @@
         } catch (error) {
           console.error("Cloud sync unavailable", error);
           document.querySelector("#save-status").textContent = "Saved locally in this browser";
-          showToast("Cloud sync is unavailable. Local saving is still active.");
+          if (error?.message === "ADMIN_ONLY_OPERATION" || error?.code === "auth/admin-only-operation" || error?.code === "auth/operation-not-allowed") {
+            showToast("Enable Anonymous sign-in in Firebase Authentication to turn on cloud sync.");
+          } else if (error?.code === "permission-denied") {
+            showToast("Publish the Firestore and Storage rules to turn on cloud sync.");
+          } else {
+            showToast("Cloud sync is unavailable. Local saving is still active.");
+          }
         }
       }
 
