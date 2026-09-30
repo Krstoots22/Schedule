@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Keep instructor dashboard server available",
+      "type": "shell",
+      "command": "if ss -lnt | grep -q ':8000 '; then echo 'Dashboard server already running on port 8000'; else exec python3 -m http.server 8000 --bind 0.0.0.0; fi",
+      "isBackground": true,
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "problemMatcher": {
+        "pattern": [{ "regexp": ".*" }],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": "\\bDashboard server already running\\b"
+        }
+      }
+    },
+    {
+      "label": "Open instructor dashboard",
+      "type": "shell",
+      "command": "${env:BROWSER}",
+      "args": ["file:///workspaces/Schedule/index.html"],
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
