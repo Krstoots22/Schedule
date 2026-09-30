@@ -145,7 +145,7 @@
 <body>
   <script type="module">
     window.firebaseCloudReady = Promise.resolve((() => {
-      const api = "/api";
+      const api = location.protocol === "file:" ? "https://super-giggle-5v45v746p9qj27qr-8000.app.github.dev/api" : "/api";
       let lastRevision = null;
       const readJson = async (response) => {
         if (!response.ok) throw new Error(`Shared server returned ${response.status}.`);
