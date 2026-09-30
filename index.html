@@ -581,16 +581,55 @@
         }, 250);
       }
 
+      function mergeWorkspaceData(localData, remoteData) {
+        const mergedCategories = Array.isArray(remoteData.categories) ? remoteData.categories.slice() : [];
+        (localData.categories || []).forEach((category) => {
+          if (!mergedCategories.some((item) => item.id === category.id)) mergedCategories.push(category);
+        });
+        const mergedFolders = {};
+        const folderSources = [localData.foldersByCategory || {}, remoteData.foldersByCategory || {}];
+        folderSources.forEach((source) => Object.entries(source).forEach(([categoryId, folders]) => {
+          if (!Array.isArray(mergedFolders[categoryId])) mergedFolders[categoryId] = [];
+          (folders || []).forEach((folder) => {
+            if (!mergedFolders[categoryId].some((item) => item.id === folder.id || item.title.toLowerCase() === folder.title.toLowerCase())) mergedFolders[categoryId].push(folder);
+          });
+        }));
+        const mergedLinks = {};
+        const linkSources = [remoteData.linksByCategory || {}, localData.linksByCategory || {}];
+        linkSources.forEach((source) => Object.entries(source).forEach(([categoryId, links]) => {
+          if (!Array.isArray(mergedLinks[categoryId])) mergedLinks[categoryId] = [];
+          (links || []).forEach((link) => {
+            const duplicate = Object.values(mergedLinks).flat().some((item) => item.url === link.url && item.title === link.title);
+            if (!duplicate) mergedLinks[categoryId].push(link);
+          });
+        }));
+        return { categories: mergedCategories, foldersByCategory: mergedFolders, linksByCategory: mergedLinks, fileRecords: Array.isArray(remoteData.fileRecords) ? remoteData.fileRecords.slice() : [] };
+      }
+
       async function initializeCloudSync() {
         try {
+          const localBaseline = {
+            categories: JSON.parse(JSON.stringify(categories)),
+            foldersByCategory: JSON.parse(JSON.stringify(foldersByCategory)),
+            linksByCategory: JSON.parse(JSON.stringify(linksByCategory))
+          };
           cloudApi = await window.firebaseCloudReady;
           if (!cloudApi) throw new Error("Firebase initialization failed.");
           const snapshot = await cloudApi.readWorkspace();
           if (snapshot.exists()) {
-            cloudWorkspace = snapshot.data();
+            cloudWorkspace = mergeWorkspaceData(localBaseline, snapshot.data());
             if (Array.isArray(cloudWorkspace.categories)) categories = cloudWorkspace.categories;
             if (cloudWorkspace.foldersByCategory && typeof cloudWorkspace.foldersByCategory === "object") foldersByCategory = cloudWorkspace.foldersByCategory;
             if (cloudWorkspace.linksByCategory && typeof cloudWorkspace.linksByCategory === "object") linksByCategory = cloudWorkspace.linksByCategory;
+            const localFiles = await readLocalFiles();
+            for (const file of localFiles) {
+              const duplicate = cloudWorkspace.fileRecords.some((record) => record.name.toLowerCase() === file.name.toLowerCase());
+              if (duplicate) continue;
+              const path = `instructor-desk/${file.id}-${file.name}`;
+              const url = await cloudApi.uploadFile(file.blob, path);
+              cloudWorkspace.fileRecords.push({ id: file.id, category: file.category, folderId: file.folderId || "unfiled", name: file.name, type: file.type, size: file.size, addedAt: file.addedAt, url, storagePath: path });
+            }
+            await cloudApi.writeWorkspace(workspaceData());
             localStorage.setItem(categoryStorageKey, JSON.stringify(categories));
             localStorage.setItem(folderStorageKey, JSON.stringify(foldersByCategory));
             localStorage.setItem(storageKey, JSON.stringify(linksByCategory));
