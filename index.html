@@ -1,52 +1,49 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0d1517">
-  <title>Instructor Desk | Class Resources</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      color-scheme: dark;
-      --ink: #f7f7f7;
-      --muted: #e0d9d9;
-      --paper: #0f0f12;
-      --paper-soft: #17181d;
-      --surface: rgba(24, 20, 22, 0.96);
-      --surface-alt: rgba(35, 27, 29, 0.98);
-      --line: rgba(255, 255, 255, 0.12);
-      --line-strong: rgba(255, 255, 255, 0.2);
-      --accent: #d71920;
-      --accent-strong: #ff4d4d;
-      --accent-dark: #180d0f;
-      --sage: #b33a38;
-      --steel: #f4f1f1;
-      --shadow: rgba(0, 0, 0, 0.42);
-      font-family: "Manrope", "Segoe UI", sans-serif;
-      font-synthesis: none;
-      text-rendering: optimizeLegibility;
-    }
-    * { box-sizing: border-box; }
-    body {
-      min-width: 320px;
-      min-height: 100vh;
-      margin: 0;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at top left, rgba(215, 25, 32, 0.28), transparent 24%),
-        linear-gradient(180deg, #0d0e12 0%, #17181d 100%);
-    }
-    button, input, select { font: inherit; }
-    a { color: inherit; }
-    .shell { width: min(1240px, 100%); margin: 0 auto; padding: 0 30px 42px; }
-    .topbar { min-height: 78px; display: flex; align-items: center; border-bottom: 1px solid var(--line); }
-    .brand { display: inline-flex; align-items: center; gap: 12px; text-decoration: none; }
-    .brand-mark { width: 37px; height: 37px; display: grid; place-items: center; border-radius: 10px 10px 10px 3px; background: linear-gradient(145deg, var(--accent), #a6141d); color: #fff; font-family: "DM Mono", monospace; font-size: 13px; box-shadow: inset 0 1px 0 rgba(255,255,255,.32); }
-    .brand-name { font-size: 13px; font-weight: 800; letter-spacing: .04em; }
-    .brand-caption, .eyebrow, .nav-index, .footer { font-family: "DM Mono", monospace; text-transform: uppercase; }
+  <script type="module">
+    window.firebaseCloudReady = Promise.resolve((() => {
+      const api = "/api";
+      let lastRevision = null;
+      const readJson = async (response) => {
+        if (!response.ok) throw new Error(`Shared server returned ${response.status}.`);
+        return response.json();
+      };
+      return {
+        async readWorkspace() {
+          const data = await readJson(await fetch(`${api}/workspace`, { cache: "no-store" }));
+          lastRevision = data.revision;
+          return { exists: () => data.workspace != null, data: () => data.workspace || { fileRecords: [] } };
+        },
+        async writeWorkspace(data) {
+          const result = await readJson(await fetch(`${api}/workspace`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }));
+          lastRevision = result.revision;
+        },
+        watchWorkspace(callback) {
+          const check = async () => {
+            try {
+              const data = await readJson(await fetch(`${api}/workspace`, { cache: "no-store" }));
+              if (data.revision !== lastRevision) {
+                lastRevision = data.revision;
+                callback(data.workspace || { fileRecords: [] });
+              }
+            } catch (error) {
+              console.error("Shared workspace polling failed", error);
+            }
+          };
+          setInterval(check, 4000);
+        },
+        async uploadFile(file) {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          let binary = "";
+          for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+          const result = await readJson(await fetch(`${api}/files`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, type: file.type, data: btoa(binary) }) }));
+          return result.url;
+        },
+        async deleteFile(path) {
+          if (path) await fetch(path, { method: "DELETE" });
+        }
+      };
+    })());
+  </script>
     .brand-caption { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; letter-spacing: .12em; }
     .intro { padding: 38px 0 28px; }
     .eyebrow { display: flex; align-items: center; gap: 8px; color: #ffb0b2; font-size: 10px; letter-spacing: .12em; }
@@ -720,7 +717,7 @@
         if (cloudWorkspace) {
           const record = (cloudWorkspace.fileRecords || []).find((file) => file.id === fileId);
           if (record) {
-            await cloudApi.deleteFile(record.storagePath);
+            await cloudApi.deleteFile(record.storagePath || record.url);
             cloudWorkspace.fileRecords = cloudWorkspace.fileRecords.filter((file) => file.id !== fileId);
             queueCloudSave();
           }
